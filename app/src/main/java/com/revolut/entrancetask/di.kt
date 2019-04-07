@@ -15,10 +15,10 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.math.BigDecimal
 import java.util.*
 
-val DEFAULT_CURRENCY = Currency.getInstance("EUR")!!
-val DEFAULT_OUTCOME_AMOUNT = BigDecimal(100)
-const val CURRENCY_ACCESS_POINT = "https://revolut.duckdns.org/"
-const val CURRENCY_FLAG_URL_PATTERN = "https://raw.githubusercontent.com/transferwise/currency-flags/master/src/flags/%s.png"
+private val DEFAULT_CURRENCY = Currency.getInstance("EUR")!!
+private val DEFAULT_OUTCOME_AMOUNT = BigDecimal(100)
+private const val CURRENCY_ACCESS_POINT = "https://revolut.duckdns.org/"
+private const val CURRENCY_FLAG_URL_PATTERN = "https://raw.githubusercontent.com/transferwise/currency-flags/master/src/flags/%s.png"
 
 fun provideCurrencyListPresenter() : CurrencyListPresenter {
     return CurrencyListPresenter(

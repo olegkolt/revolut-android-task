@@ -1,12 +1,8 @@
 package com.revolut.entrancetask.presentation
 
-import android.util.Log
 import com.revolut.entrancetask.domain.CurrencyRatesUseCase
-import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.CompositeDisposable
-import io.reactivex.schedulers.Schedulers
 import java.math.BigDecimal
-import java.util.concurrent.TimeUnit
 
 class CurrencyListPresenter(
     private val useCase: CurrencyRatesUseCase
@@ -18,18 +14,16 @@ class CurrencyListPresenter(
         view!!.let { view ->
             compositeDisposable.add(
                 useCase.listState
-                    .subscribe ({
+                    .subscribe {
                         view.showList(it)
-                    }, {
-                        Log.d("TTT", "error", it) //@todo
-                    })
+                    }
             )
 
             compositeDisposable.add(
                 view.outcomeAmount
                     .subscribe {
                         val amount = try {
-                            BigDecimal(it)
+                            BigDecimal(it.replace(',', '.'))
                         } catch (ex: NumberFormatException) {
                             BigDecimal.ZERO
                         }
@@ -40,7 +34,7 @@ class CurrencyListPresenter(
             compositeDisposable.add(
                 view.currencySelection
                     .subscribe {
-                        //useCase.updateOutcomeCurrency(it.amount, it.currency)
+                        useCase.updateOutcomeCurrency(it.amount, it.currency)
                     }
             )
 
@@ -49,7 +43,7 @@ class CurrencyListPresenter(
     }
 
     fun onStop() {
-        compositeDisposable.dispose()
+        compositeDisposable.clear()
     }
 
     fun bindView(view: CurrencyListView) {

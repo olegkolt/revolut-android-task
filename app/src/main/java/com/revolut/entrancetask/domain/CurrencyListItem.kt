@@ -1,12 +1,13 @@
 package com.revolut.entrancetask.domain
 
+import java.math.BigDecimal
 import java.util.*
 
-/**
- * Элемент списка валют
- */
 data class CurrencyListItem(
     val currency: Currency,
     val currencyFlagUrl: String,
-    val amountState: CurrencyAmountState
+    /**
+     * Null if amount has not calculated jet
+     */
+    var amount: BigDecimal?
 )

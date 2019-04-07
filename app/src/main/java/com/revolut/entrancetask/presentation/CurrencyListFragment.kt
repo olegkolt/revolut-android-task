@@ -7,17 +7,14 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
-import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.revolut.entrancetask.R
 import com.revolut.entrancetask.domain.*
 import com.revolut.entrancetask.provideCurrencyListPresenter
 import io.reactivex.Observable
 import kotlinx.android.synthetic.main.currency_list_fragment.*
-import java.math.BigDecimal
-import java.util.*
 import androidx.recyclerview.widget.RecyclerView
-
+import androidx.recyclerview.widget.SimpleItemAnimator
 
 
 class CurrencyListFragment : Fragment(), CurrencyListView {
@@ -30,21 +27,9 @@ class CurrencyListFragment : Fragment(), CurrencyListView {
         get() = adapter.outcomeAmount
 
     override val currencySelection: Observable<CurrencyClickEvent>
-        get() = adapter.currencySelection.doOnNext { event ->
-            val position = list.indexOfFirst { it.currency == event.currency }
-
-            val data = list[position]
-
-            list.removeAt(position)
-            list.add(0, data)
-
-            Handler().post(waitForAnimationsToFinishRunnable)
-            adapter.notifyItemMoved(position, 0)
-            adapter.notifyItemRangeChanged(1, list.size - 1)
-        }
+        get() = adapter.currencySelection
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-
         presenter = provideCurrencyListPresenter()
 
         return inflater.inflate(R.layout.currency_list_fragment, container, false)
@@ -57,82 +42,86 @@ class CurrencyListFragment : Fragment(), CurrencyListView {
         currencyRecycler.layoutManager = layoutManager
         currencyRecycler.adapter = adapter
 
+        // disable animation for updating item content
+        (currencyRecycler.itemAnimator as SimpleItemAnimator).supportsChangeAnimations = false
+
         presenter.bindView(this)
     }
 
     override fun showList(listState: CurrencyListState) {
         when (listState) {
             is CurrencyListLoadedState -> {
+                progressView.visibility = View.GONE
+                errorView.visibility = View.GONE
                 currencyRecycler.visibility = View.VISIBLE
 
-                val diffCallback = CurrencyListDiffUtilCallBack(list, listState.list)
-                val diffResult = DiffUtil.calculateDiff(diffCallback)
                 list.clear()
                 list.addAll(listState.list)
+                adapter.notifyDataSetChanged()
+            }
+            is CurrencyListCurrencyMovedTopState -> {
+                val position = list.indexOfFirst { it.currency == listState.currency }
+                val data = list[position]
 
+                list.removeAt(position)
+                list.add(0, data)
+                adapter.notifyItemMoved(position, 0)
+                adapter.notifyItemRangeChanged(0, 2)
+
+                Handler().post(waitForAnimationsToFinishRunnable)
+            }
+            is CurrencyListUpdateValues -> {
+                list.forEachIndexed { index, item ->
+                    if (index > 0) {
+                        listState.newValues[item.currency]?.let {
+                            item.amount = it
+                        }
+                    }
+                }
                 currencyRecycler.post {
-                    diffResult.dispatchUpdatesTo(adapter)
-                    //Handler().post(waitForAnimationsToFinishRunnable)
-//                    currencyRecycler.post {
-//                        if (listState.focusOutcome) {
-//                            currencyRecycler.scrollToPosition(0)
-//                        }
-//                    }
+                    adapter.notifyItemRangeChanged(1, list.size - 1)
+                }
+            }
+            is CurrencyListHideIncomeValues -> {
+                list.forEachIndexed { index, item ->
+                    if (index > 0) {
+                        item.amount = null
+                    }
+                }
+                currencyRecycler.post {
+                    adapter.notifyItemRangeChanged(1, list.size - 1)
                 }
             }
             is CurrencyListErrorState -> {
                 currencyRecycler.visibility = View.GONE
+                progressView.visibility = View.GONE
+                errorView.visibility = View.VISIBLE
             }
             is CurrencyListLoadingState -> {
                 currencyRecycler.visibility = View.GONE
+                progressView.visibility = View.VISIBLE
+                errorView.visibility = View.GONE
             }
         }
-    }
-
-    fun changeAdapterData() {
-        // ...
-        // Changes are made to the data held by the adapter
-        currencyRecycler.getAdapter()!!.notifyDataSetChanged()
-
-        // The recycler view have not started animating yet, so post a message to the
-        // message queue that will be run after the recycler view have started animating.
-        Handler().post(waitForAnimationsToFinishRunnable)
     }
 
     private val waitForAnimationsToFinishRunnable = Runnable { waitForAnimationsToFinish() }
 
-    // When the data in the recycler view is changed all views are animated. If the
-    // recycler view is animating, this method sets up a listener that is called when the
-    // current animation finishes. The listener will call this method again once the
-    // animation is done.
     private fun waitForAnimationsToFinish() {
-        if (currencyRecycler.isAnimating()) {
-            // The recycler view is still animating, try again when the animation has finished.
-            currencyRecycler.getItemAnimator()!!.isRunning(animationFinishedListener)
+        if (currencyRecycler.isAnimating) {
+            currencyRecycler.itemAnimator!!.isRunning(animationFinishedListener)
             return
         }
 
-        // The recycler view have animated all it's views
         onRecyclerViewAnimationsFinished()
     }
 
-    // Listener that is called whenever the recycler view have finished animating one view.
     private val animationFinishedListener = RecyclerView.ItemAnimator.ItemAnimatorFinishedListener {
-        // The current animation have finished and there is currently no animation running,
-        // but there might still be more items that will be animated after this method returns.
-        // Post a message to the message queue for checking if there are any more
-        // animations running.
         Handler().post(waitForAnimationsToFinishRunnable)
     }
 
-    // The recycler view is done animating, it's now time to doStuff().
     private fun onRecyclerViewAnimationsFinished() {
         currencyRecycler.scrollToPosition(0)
-
-        currencyRecycler.post {
-
-
-        }
     }
 
     override fun onStart() {

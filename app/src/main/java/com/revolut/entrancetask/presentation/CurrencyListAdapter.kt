@@ -12,9 +12,6 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import com.revolut.entrancetask.R
 import com.revolut.entrancetask.domain.CurrencyListItem
-import com.revolut.entrancetask.domain.CurrencyAmountIncomeState
-import com.revolut.entrancetask.domain.CurrencyAmountLoading
-import com.revolut.entrancetask.domain.CurrencyAmountOutcomeState
 import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
@@ -25,13 +22,10 @@ import java.text.DecimalFormat
 
 
 class CurrencyListAdapter(
-    private val list: List<CurrencyListItem>
+    private var list: List<CurrencyListItem>
 ) : RecyclerView.Adapter<CurrencyListAdapter.ViewHolder>() {
 
     companion object {
-        private const val TYPE_OUTCOME = 0
-        private const val TYPE_INCOME = 1
-
         fun formatCurrency(currency: Currency, amount: BigDecimal): String {
             val df = DecimalFormat().apply {
                 maximumFractionDigits = currency.defaultFractionDigits
@@ -65,19 +59,10 @@ class CurrencyListAdapter(
     val outcomeAmount: Observable<String> = outcomeAmountSubject.hide()
     val currencySelection: Observable<CurrencyClickEvent> = selectCurrencySubject.hide()
 
-    override fun getItemViewType(position: Int): Int {
-        val item = list[position]
-
-        return if (item.amountState is CurrencyAmountOutcomeState) {
-            TYPE_OUTCOME
-        } else {
-            TYPE_INCOME
-        }
-    }
-
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.currency_list_item, parent, false) as View
+
         return ViewHolder(view)
     }
 
@@ -88,6 +73,13 @@ class CurrencyListAdapter(
 
         holder.currencyName.text = item.currency.displayName
         holder.code.text = item.currency.currencyCode
+        holder.amount.removeTextChangedListener(outcomeTextWatcher)
+        if (position == 0) {
+            holder.amount.addTextChangedListener(outcomeTextWatcher)
+            holder.amount.isEnabled = true
+        } else {
+            holder.amount.isEnabled = false
+        }
 
         Glide.with(holder.itemView.context)
             .load(item.currencyFlagUrl)
@@ -96,33 +88,16 @@ class CurrencyListAdapter(
 
         holder.itemView.setOnClickListener(onItemClickListener)
 
-        when {
-            item.amountState is CurrencyAmountOutcomeState -> {
-                holder.amount.removeTextChangedListener(outcomeTextWatcher)
-                item.amountState.outcomeAmount?.let {
-                    holder.amount.text = formatCurrency(item.currency, it)
-                }
-                holder.amount.isEnabled = true
-                holder.amount.requestFocus()
-                holder.amount.addTextChangedListener(outcomeTextWatcher)
-            }
-            item.amountState is CurrencyAmountIncomeState -> {
-                holder.amount.text = formatCurrency(item.currency, item.amountState.incomeAmount)
-                holder.amount.isEnabled = false
-
-                holder.amount.removeTextChangedListener(outcomeTextWatcher)
-                holder.itemView.setTag(
-                    R.id.currency_click_event_tag, CurrencyClickEvent(item.amountState.incomeAmount, item.currency)
-                )
-            }
-            item.amountState is CurrencyAmountLoading -> {
-                holder.amount.text = "__" // @todo
-                holder.amount.isEnabled = false
-
-                holder.amount.removeTextChangedListener(outcomeTextWatcher)
-                holder.itemView.setTag(R.id.currency_click_event_tag, null)
-            }
+        if (item.amount != null) {
+            holder.amount.visibility = View.VISIBLE
+            holder.amount.text = formatCurrency(item.currency, item.amount!!)
+        } else {
+            holder.amount.visibility = View.GONE
         }
+
+        holder.itemView.setTag(
+            R.id.currency_click_event_tag, if (item.amount != null) CurrencyClickEvent(item.amount!!, item.currency) else null
+        )
     }
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {

@@ -6,9 +6,10 @@ import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
 import java.math.BigDecimal
 import java.util.*
+import java.util.concurrent.TimeUnit
 
 /**
- * Keep state of outcomeAmount and outcomeCurrency
+ * Keeps state of outcomeAmount, outcomeCurrency and loadedRates
  */
 class CurrencyRatesUseCase(
     private var outcomeAmount: BigDecimal,
@@ -18,16 +19,18 @@ class CurrencyRatesUseCase(
     private val schedulers: AppSchedulers
 ) {
     companion object {
-        private fun generateState(
+        private fun calculateIncome(rate: BigDecimal, outcomeAmount: BigDecimal): BigDecimal {
+            return rate.multiply(outcomeAmount).apply {
+                setScale(2, BigDecimal.ROUND_HALF_UP)
+            }
+        }
+
+        private fun generateInitialState(
             currencyRates: CurrencyRelativeRates?,
-            updateOutcomeAmount: Boolean,
-            isCurrencyChanged: Boolean,
             outcomeAmount: BigDecimal,
             outcomeCurrency: Currency,
             urlGenerator: CurrencyFlagUrlGenerator
         ) : CurrencyListState {
-            val isRatesCorrect = currencyRates?.base == outcomeCurrency
-
             return when {
                 currencyRates == null -> CurrencyListLoadingState
                 currencyRates.rates.isEmpty() -> CurrencyListErrorState
@@ -36,31 +39,24 @@ class CurrencyRatesUseCase(
                         CurrencyListItem(
                             currencyRates.base,
                             urlGenerator.generate(currencyRates.base),
-                            CurrencyAmountOutcomeState(if (updateOutcomeAmount) outcomeAmount else null)
+                            outcomeAmount
                         )
                     ) + currencyRates.rates
                         .filter { it.currency != outcomeCurrency }
                         .map { rate ->
-                        CurrencyListItem(
-                            rate.currency,
-                            urlGenerator.generate(rate.currency),
-                            if (!isRatesCorrect)
-                                CurrencyAmountLoading
-                            else
-                                CurrencyAmountIncomeState(
-                                    rate.rate.multiply(outcomeAmount).apply {
-                                        setScale(2, BigDecimal.ROUND_HALF_UP)
-                                    }
-                                )
-                        )
-                    },
-                    focusOutcome = isCurrencyChanged
+                            CurrencyListItem(
+                                rate.currency,
+                                urlGenerator.generate(rate.currency),
+                                calculateIncome(rate.rate, outcomeAmount)
+                            )
+                        }
                 )
             }
-    }
+        }
     }
 
     private val requestSubject: Subject<Currency> = PublishSubject.create()
+    private val updateSubject: Subject<Currency> = PublishSubject.create()
     private val stateSubject: Subject<CurrencyListState> = PublishSubject.create()
     private var loadedRates: CurrencyRelativeRates? = null
 
@@ -73,52 +69,67 @@ class CurrencyRatesUseCase(
                     .toObservable()
             }.map { ratesResult ->
                 loadedRates = ratesResult
-                generateState(
+                generateInitialState(
                     currencyRates = loadedRates,
-                    updateOutcomeAmount = true,
-                    isCurrencyChanged = false,
                     outcomeAmount = outcomeAmount,
                     outcomeCurrency = outcomeCurrency,
                     urlGenerator = urlGenerator
                 )
             }
+            .onErrorResumeNext(Observable.just(CurrencyListErrorState))
             .observeOn(schedulers.ui)
             .subscribe(stateSubject)
+
+        updateSubject.hide()
+            .switchMap { ratesRepository
+                .loadRates(it)
+                .subscribeOn(schedulers.io)
+                .toObservable()
+                .materialize()
+                .filter { notification -> notification.isOnNext }
+                .dematerialize<CurrencyRelativeRates>()
+            }
+            .filter { it.base == outcomeCurrency } // filter responses from old already changed currency
+            .map { ratesResult ->
+                loadedRates = ratesResult
+                CurrencyListUpdateValues(
+                    ratesResult.rates.map { it.currency to calculateIncome(it.rate, outcomeAmount) }.toMap()
+                )
+            }
+            .onErrorResumeNext(Observable.empty())
+            .observeOn(schedulers.ui)
+            .subscribe(stateSubject)
+
+        Observable.interval(1, TimeUnit.SECONDS)
+            .map { outcomeCurrency }
+            .subscribe(updateSubject)
     }
 
     val listState: Observable<CurrencyListState> = stateSubject.hide()
 
     fun load() {
+        stateSubject.onNext(CurrencyListLoadingState)
         requestSubject.onNext(outcomeCurrency)
     }
 
     fun updateOutcomeAmount(newOutcomeAmount: BigDecimal) {
         outcomeAmount = newOutcomeAmount
-        stateSubject.onNext(
-            generateState(
-                currencyRates = loadedRates,
-                updateOutcomeAmount = false,
-                isCurrencyChanged = false,
-                outcomeAmount = outcomeAmount,
-                outcomeCurrency = outcomeCurrency,
-                urlGenerator = urlGenerator
+
+        loadedRates?.let { rates ->
+            stateSubject.onNext(
+                CurrencyListUpdateValues(
+                    rates.rates.map { it.currency to calculateIncome(it.rate, outcomeAmount) }.toMap()
+                )
             )
-        )
+        }
     }
 
     fun updateOutcomeCurrency(newOutcomeAmount: BigDecimal, newOutcomeCurrency: Currency) {
         outcomeAmount = newOutcomeAmount
         outcomeCurrency = newOutcomeCurrency
-        stateSubject.onNext(
-            generateState(
-                currencyRates = loadedRates,
-                updateOutcomeAmount = true,
-                isCurrencyChanged = true,
-                outcomeAmount = outcomeAmount,
-                outcomeCurrency = outcomeCurrency,
-                urlGenerator = urlGenerator
-            )
-        )
-        requestSubject.onNext(outcomeCurrency)
+        stateSubject.onNext(CurrencyListCurrencyMovedTopState(newOutcomeCurrency))
+        stateSubject.onNext(CurrencyListHideIncomeValues)
+
+        updateSubject.onNext(outcomeCurrency)
     }
 }

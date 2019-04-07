@@ -12,9 +12,10 @@ import java.util.*
 
 
 /**
- * Example local unit test, which will execute on the development machine (host).
+ * Positive use case test
  *
- * See [testing documentation](http://d.android.com/tools/testing).
+ * - check data receiving
+ * - check income amount calculation
  */
 class CurrencyRateUseCaseTest {
 
@@ -57,47 +58,31 @@ class CurrencyRateUseCaseTest {
             AppSchedulers(Schedulers.trampoline(), Schedulers.trampoline())
         )
 
-        var loadedState: CurrencyListLoadedState? = null
-
+        val resultStates: MutableList<Any> = mutableListOf()
         useCase.listState
             .subscribe { state ->
-                loadedState = state as CurrencyListLoadedState
+                resultStates.add(state)
             }
 
         useCase.load()
 
-        assertNotNull(loadedState)
-        val list = loadedState!!.list
+        assertEquals(2, resultStates.size)
+        assertTrue(resultStates[0] is CurrencyListLoadingState)
+        assertTrue(resultStates[1] is CurrencyListLoadedState)
+
+        val loadedState: CurrencyListLoadedState = resultStates[1] as CurrencyListLoadedState
+        val list = loadedState.list
 
         assertEquals(3, list.size)
 
-        assertCurrencyListItem(CurrencyListItem(EUR, "", CurrencyAmountOutcomeState(BigDecimal(10))),list.first())
-        assertCurrencyListItem(CurrencyListItem(RUB, "", CurrencyAmountIncomeState(BigDecimal(800))), list[1])
-        assertCurrencyListItem(CurrencyListItem(USD, "", CurrencyAmountIncomeState(BigDecimal(11))), list.last())
+        assertCurrencyListItem(CurrencyListItem(EUR, "", BigDecimal(10)),list.first())
+        assertCurrencyListItem(CurrencyListItem(RUB, "", BigDecimal(800)), list[1])
+        assertCurrencyListItem(CurrencyListItem(USD, "", BigDecimal(11)), list.last())
     }
 
     private fun assertCurrencyListItem(itemExpected: CurrencyListItem, itemActual: CurrencyListItem) {
         assertEquals(itemExpected.currency, itemActual.currency)
-
-        when {
-            itemExpected.amountState is CurrencyAmountOutcomeState -> {
-                assertTrue(itemActual.amountState is CurrencyAmountOutcomeState)
-                assertEqualBigDecimal(
-                    (itemActual.amountState as CurrencyAmountOutcomeState).outcomeAmount,
-                    (itemExpected.amountState as CurrencyAmountOutcomeState).outcomeAmount
-                )
-            }
-            itemExpected.amountState is CurrencyAmountIncomeState -> {
-                assertTrue(itemActual.amountState is CurrencyAmountIncomeState)
-                assertEqualBigDecimal(
-                    (itemActual.amountState as CurrencyAmountIncomeState).incomeAmount,
-                    (itemExpected.amountState as CurrencyAmountIncomeState).incomeAmount
-                )
-            }
-            itemExpected.amountState is CurrencyAmountLoading -> {
-                assertTrue(itemActual.amountState is CurrencyAmountLoading)
-            }
-        }
+        assertEqualBigDecimal(itemActual.amount!!, itemExpected.amount!!)
     }
 
     private fun assertEqualBigDecimal(expected: BigDecimal, actual: BigDecimal) {
